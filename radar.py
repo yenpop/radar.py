@@ -3,6 +3,7 @@ import pandas as pd
 import yfinance as yf
 import requests
 import time
+import json  # ★ 新增：用來讀取本地端的 JSON 檔案
 
 # ==========================================
 # 1. 介面與視覺風格 (完全保留)
@@ -11,33 +12,33 @@ st.set_page_config(page_title="電子股低基期搜尋", layout="wide")
 
 st.markdown("""
 <style>
-    .stApp { background-color: #0b0f19; color: #00ffcc; }
-    h1, h2, h3 { color: #00e5ff !important; text-shadow: 0px 0px 8px rgba(0, 229, 255, 0.6); font-family: 'Consolas', monospace; }
-    .stButton > button { background: transparent; color: #00e5ff; border: 2px solid #00e5ff; border-radius: 4px; font-weight: bold; width: 100%; }
-    .stButton > button:hover { background: #00e5ff; color: #0b0f19; }
-    .stTextInput > div > div > input { background-color: #111a2e; color: #00ffcc; border: 1px solid #00e5ff; }
-    ::-webkit-scrollbar { width: 12px; }
-    ::-webkit-scrollbar-thumb { background: #ffcc00 !important; border-radius: 6px; }
-    .highlight-input-title { color: #ffdd00 !important; font-size: 1.3em; font-weight: 900; }
-    .risk-alert { color: #ff4d4d; font-size: 0.9em; margin-bottom: 20px; border-left: 4px solid #ff4d4d; padding-left: 15px; text-shadow: 0px 0px 5px rgba(255, 77, 77, 0.5); }
+   .stApp { background-color: #0b0f19; color: #00ffcc; }
+   h1, h2, h3 { color: #00e5ff !important; text-shadow: 0px 0px 8px rgba(0, 229, 255, 0.6); font-family: 'Consolas', monospace; }
+   .stButton > button { background: transparent; color: #00e5ff; border: 2px solid #00e5ff; border-radius: 4px; font-weight: bold; width: 100%; }
+   .stButton > button:hover { background: #00e5ff; color: #0b0f19; }
+   .stTextInput > div > div > input { background-color: #111a2e; color: #00ffcc; border: 1px solid #00e5ff; }
+   ::-webkit-scrollbar { width: 12px; }
+   ::-webkit-scrollbar-thumb { background: #ffcc00 !important; border-radius: 6px; }
+   .highlight-input-title { color: #ffdd00 !important; font-size: 1.3em; font-weight: 900; }
+   .risk-alert { color: #ff4d4d; font-size: 0.9em; margin-bottom: 20px; border-left: 4px solid #ff4d4d; padding-left: 15px; text-shadow: 0px 0px 5px rgba(255, 77, 77, 0.5); }
 </style>
 """, unsafe_allow_html=True)
 
-@st.cache_data(ttl=3600)
+# ==========================================
+# ★ 修改區塊：改為讀取靜態 JSON 檔案，避開 API 阻擋 ★
+# ==========================================
+@st.cache_data(ttl=86400) # 快取設定為一天即可
 def get_reliable_db():
-    db = {}
-    headers = {"User-Agent": "Mozilla/5.0"}
     try:
-        twse = requests.get("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL", headers=headers, timeout=5).json()
-        for item in twse:
-            code = str(item.get("Code", "")).strip()
-            if len(code) == 4: db[code] = {"name": str(item.get("Name", "")).strip(), "suffix": ".TW"}
-        tpex = requests.get("https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes", headers=headers, timeout=5).json()
-        for item in tpex:
-            code = str(item.get("SecuritiesCompanyCode", "")).strip()
-            if len(code) == 4: db[code] = {"name": str(item.get("CompanyName", "")).strip(), "suffix": ".TWO"}
-    except: pass
-    return db
+        # 直接讀取同資料夾下的 JSON 檔案
+        with open('stock_map.json', 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        st.error("❌ 找不到 stock_map.json 檔案！請確認是否有與程式碼一起上傳到 GitHub。")
+        return {}
+    except Exception as e:
+        st.error(f"❌ 讀取資料庫時發生錯誤: {e}")
+        return {}
 
 stock_map = get_reliable_db()
 
@@ -135,7 +136,7 @@ def analyze_all_stocks(sid, df, stock_name, suffix):
         }
     except: return None
 
-# 表格配置：加入進階AI解析欄位，寬度調整為 large 讓字不會被切掉
+# 表格配置
 table_config = {
     "代碼": st.column_config.LinkColumn("代碼", display_text=r"code=(.*)"),
     "名稱": st.column_config.LinkColumn("名稱", display_text=r"name=(.*)"),
@@ -197,6 +198,6 @@ with col_right:
                     if res and "✅" in res["狀態"]:
                         results.append(res)
                         placeholder.dataframe(pd.DataFrame(results)[["狀態", "代碼", "名稱", "現價", "支撐位", "預計空間", "進階AI解析"]], 
-                                            column_config=table_config, hide_index=True, use_container_width=True)
+                                              column_config=table_config, hide_index=True, use_container_width=True)
                 except: continue
         st.success(f"任務完成！")
