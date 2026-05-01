@@ -3,10 +3,10 @@ import pandas as pd
 import yfinance as yf
 import requests
 import time
-import json  # ★ 新增：用來讀取本地端的 JSON 檔案
+import json
 
 # ==========================================
-# 1. 介面與視覺風格 (完全保留)
+# 1. 介面與視覺風格
 # ==========================================
 st.set_page_config(page_title="電子股低基期搜尋", layout="wide")
 
@@ -25,25 +25,24 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# ★ 修改區塊：改為讀取靜態 JSON 檔案，避開 API 阻擋 ★
+# ★ 資料庫讀取：改用靜態 JSON 避開 API 阻擋 ★
 # ==========================================
-@st.cache_data(ttl=86400) # 快取設定為一天即可
+@st.cache_data(ttl=86400)
 def get_reliable_db():
     try:
-        # 直接讀取同資料夾下的 JSON 檔案
         with open('stock_map.json', 'r', encoding='utf-8') as f:
             return json.load(f)
     except FileNotFoundError:
-        st.error("❌ 找不到 stock_map.json 檔案！請確認是否有與程式碼一起上傳到 GitHub。")
+        st.error("❌ 找不到 stock_map.json 檔案！請確認是否有上傳至 GitHub。")
         return {}
     except Exception as e:
-        st.error(f"❌ 讀取資料庫時發生錯誤: {e}")
+        st.error(f"❌ 讀取資料庫發生錯誤: {e}")
         return {}
 
 stock_map = get_reliable_db()
 
 # ==========================================
-# 2. 核心分析引擎 (原創邏輯100%鎖定 + AI籌碼預估)
+# 2. 核心分析引擎 (已修復型別轉換陷阱)
 # ==========================================
 def analyze_all_stocks(sid, df, stock_name, suffix):
     if df is None or df.empty or len(df) < 60: return None 
@@ -53,13 +52,14 @@ def analyze_all_stocks(sid, df, stock_name, suffix):
         low = df['Low'].squeeze()
         vol = df['Volume'].squeeze()
         
+        # ⚠️ 關鍵修復：所有數值強制加上 float()，避免 Streamlit 畫表格時報錯崩潰
         curr_price = float(close.iloc[-1])
-        ma5 = close.rolling(5).mean().iloc[-1]
-        ma10 = close.rolling(10).mean().iloc[-1]
-        ma20 = close.rolling(20).mean().iloc[-1]
-        ma20_prev = close.rolling(20).mean().iloc[-5]
+        ma5 = float(close.rolling(5).mean().iloc[-1])
+        ma10 = float(close.rolling(10).mean().iloc[-1])
+        ma20 = float(close.rolling(20).mean().iloc[-1])
+        ma20_prev = float(close.rolling(20).mean().iloc[-5])
         
-        # 支撐位偵測
+        # 支撐位偵測 (這裡的 dynamic_support 也要確保是 float)
         if curr_price >= ma5:
             dynamic_support = ma5
             support_label = "💪 強勢5日線"
@@ -67,7 +67,7 @@ def analyze_all_stocks(sid, df, stock_name, suffix):
             dynamic_support = ma20
             support_label = "🛡️ 月線支撐"
         else:
-            dynamic_support = low.iloc[-20:].min()
+            dynamic_support = float(low.iloc[-20:].min())
             support_label = "⚠️ 近20日低點"
 
         # 原始參數 (壓力位)
@@ -75,10 +75,10 @@ def analyze_all_stocks(sid, df, stock_name, suffix):
         p2 = float(high.iloc[-60:].max())
         
         # ----------------------------------------------------
-        # ⚠️ 【絕對防護區】過濾條件與文字標籤完全不動
+        # 【絕對防護區】
         # ----------------------------------------------------
         is_compressed = (max(ma5, ma10, ma20) - min(ma5, ma10, ma20)) / min(ma5, ma10, ma20) < 0.025
-        is_quiet = vol.iloc[-1] < vol.rolling(20).mean().iloc[-1] * 1.3
+        is_quiet = float(vol.iloc[-1]) < float(vol.rolling(20).mean().iloc[-1]) * 1.3
         is_stable = ma20 >= ma20_prev * 0.998 and curr_price >= ma20 * 0.98
         space = ((p1 - curr_price) / curr_price) * 100
         is_room_ok = 5 <= space <= 25
@@ -93,14 +93,12 @@ def analyze_all_stocks(sid, df, stock_name, suffix):
         yahoo_url = f"https://tw.stock.yahoo.com/quote/{sid}{suffix}/technical-analysis"
         
         # ----------------------------------------------------
-        # 🌟 【解決 API 問題】改用大數據價量模型預估主力動能
+        # 【AI 籌碼預估】
         # ----------------------------------------------------
-        # 1. 破 5MA 更精確判定
         ai_tech_advice = "⚠️ 跌破 5MA" if curr_price < ma5 else "🚀 站穩 5MA"
         
-        # 2. 交易量趨勢
-        vol_5d_avg = vol.iloc[-5:].mean() if len(vol) >= 5 else vol.iloc[-1]
-        vol_20d_avg = vol.rolling(20).mean().iloc[-1]
+        vol_5d_avg = float(vol.iloc[-5:].mean()) if len(vol) >= 5 else float(vol.iloc[-1])
+        vol_20d_avg = float(vol.rolling(20).mean().iloc[-1])
         
         if vol_5d_avg > vol_20d_avg * 1.2:
             vol_trend = "📈 交易量提高"
@@ -109,16 +107,16 @@ def analyze_all_stocks(sid, df, stock_name, suffix):
         else:
             vol_trend = "➖ 量能不變"
             
-        # 3. 主力/法人籌碼預估 (完美替代缺少的 API 數據)
         prev_close = float(close.iloc[-2])
-        if curr_price > prev_close and vol.iloc[-1] > vol_20d_avg * 1.1:
+        current_vol = float(vol.iloc[-1])
+        
+        if curr_price > prev_close and current_vol > vol_20d_avg * 1.1:
             inst_status = "💰 主力偏多進駐"
-        elif curr_price < prev_close and vol.iloc[-1] > vol_20d_avg * 1.1:
+        elif curr_price < prev_close and current_vol > vol_20d_avg * 1.1:
             inst_status = "⚠️ 主力帶量倒貨"
         else:
             inst_status = "💤 籌碼量縮觀望"
             
-        # 組合全新的、無報錯的進階分析
         advanced_ai_analysis = f"{ai_tech_advice} | {vol_trend} | {inst_status}"
         
         return {
@@ -134,7 +132,10 @@ def analyze_all_stocks(sid, df, stock_name, suffix):
             "操作指南": "🎯 守住支撐可佈局" if not reasons else "⌛ 條件尚未達成",
             "進階AI解析": advanced_ai_analysis
         }
-    except: return None
+    except Exception as e:
+        # 發生錯誤時印出，方便你在網頁版 Logs 抓蟲，不要直接吃掉
+        print(f"分析 {sid} 時發生錯誤: {e}") 
+        return None
 
 # 表格配置
 table_config = {
@@ -170,18 +171,21 @@ with col_left:
         if target_sid:
             info = stock_map.get(target_sid, {"name": user_input, "suffix": ".TW"})
             with st.spinner(f"分析中 {info['name']}..."):
-                df_data = yf.Ticker(f"{target_sid}{info['suffix']}").history(period="75d")
-                report = analyze_all_stocks(target_sid, df_data, info["name"], info["suffix"])
-                if report:
-                    if "✅" in report["狀態"]: st.success(report["狀態"])
-                    else: st.warning(report["狀態"])
-                    
-                    st.info(f"📊 動態監測：{report['現況短評']}")
-                    st.warning(f"🤖 **AI 深度解析：** {report['進階AI解析']}")
-                    st.error(f"⚔️ {report['操作指南']}")
-                    
-                    st.dataframe(pd.DataFrame([report])[["代碼", "名稱", "現價", "支撐位", "第一壓力", "終極壓力", "預計空間", "進階AI解析"]], 
-                                 column_config=table_config, hide_index=True, use_container_width=True)
+                try:
+                    df_data = yf.Ticker(f"{target_sid}{info['suffix']}").history(period="75d")
+                    report = analyze_all_stocks(target_sid, df_data, info["name"], info["suffix"])
+                    if report:
+                        if "✅" in report["狀態"]: st.success(report["狀態"])
+                        else: st.warning(report["狀態"])
+                        
+                        st.info(f"📊 動態監測：{report['現況短評']}")
+                        st.warning(f"🤖 **AI 深度解析：** {report['進階AI解析']}")
+                        st.error(f"⚔️ {report['操作指南']}")
+                        
+                        st.dataframe(pd.DataFrame([report])[["代碼", "名稱", "現價", "支撐位", "第一壓力", "終極壓力", "預計空間", "進階AI解析"]], 
+                                     column_config=table_config, hide_index=True, use_container_width=True)
+                except Exception as e:
+                    st.error(f"讀取資料發生錯誤：{e}")
 
 with col_right:
     st.subheader("🚀 700 檔強效獵殺")
@@ -193,11 +197,11 @@ with col_right:
             bar.progress((idx + 1) / len(all_codes))
             if sid in stock_map:
                 try:
-                    df = yf.Ticker(f"{sid}{stock_map[sid]['suffix']}").history(period="75d")
+                    df = yf.Ticker(f"{sid}{stock_map[sid]['suffix']}").history(period="75d", raise_errors=False)
                     res = analyze_all_stocks(sid, df, stock_map[sid]['name'], stock_map[sid]['suffix'])
                     if res and "✅" in res["狀態"]:
                         results.append(res)
                         placeholder.dataframe(pd.DataFrame(results)[["狀態", "代碼", "名稱", "現價", "支撐位", "預計空間", "進階AI解析"]], 
                                               column_config=table_config, hide_index=True, use_container_width=True)
                 except: continue
-        st.success(f"任務完成！")
+        st.success("任務完成！")
