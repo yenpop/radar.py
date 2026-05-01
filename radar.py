@@ -26,26 +26,17 @@ st.markdown("""
 @st.cache_data(ttl=3600)
 def get_reliable_db():
     db = {}
-    # 增加完整 headers 偽裝成正常瀏覽器
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "application/json"
-    }
+    headers = {"User-Agent": "Mozilla/5.0"}
     try:
-        # 使用 corsproxy 代理服務，繞過台灣政府 API 對 Streamlit 雲端海外 IP 的阻擋
-        twse_url = "https://corsproxy.io/?https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
-        twse = requests.get(twse_url, headers=headers, timeout=10).json()
+        twse = requests.get("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL", headers=headers, timeout=5).json()
         for item in twse:
             code = str(item.get("Code", "")).strip()
             if len(code) == 4: db[code] = {"name": str(item.get("Name", "")).strip(), "suffix": ".TW"}
-            
-        tpex_url = "https://corsproxy.io/?https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes"
-        tpex = requests.get(tpex_url, headers=headers, timeout=10).json()
+        tpex = requests.get("https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes", headers=headers, timeout=5).json()
         for item in tpex:
             code = str(item.get("SecuritiesCompanyCode", "")).strip()
             if len(code) == 4: db[code] = {"name": str(item.get("CompanyName", "")).strip(), "suffix": ".TWO"}
-    except: 
-        pass
+    except: pass
     return db
 
 stock_map = get_reliable_db()
